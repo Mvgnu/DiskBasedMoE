@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <title>Disk-Backed MoE Chat</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+
+      :root {
+        --bg: #0b0f1a;
+        --bg-glow: #1b2a4a;
+        --panel: rgba(13, 18, 32, 0.9);
+        --panel-border: rgba(120, 150, 200, 0.2);
+        --accent: #5eead4;
+        --accent-2: #fbbf24;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --user: #1f2937;
+        --assistant: #0f172a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at top left, var(--bg-glow), var(--bg));
+        min-height: 100vh;
+      }
+
+      header {
+        padding: 24px clamp(16px, 4vw, 48px);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: clamp(24px, 3vw, 36px);
+        letter-spacing: -0.02em;
+      }
+
+      header span {
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      .layout {
+        display: grid;
+        gap: 24px;
+        padding: 0 clamp(16px, 4vw, 48px) 48px;
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      @media (min-width: 900px) {
+        .layout {
+          grid-template-columns: 280px minmax(0, 1fr);
+        }
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        padding: 18px;
+        box-shadow: 0 10px 30px rgba(5, 10, 20, 0.4);
+      }
+
+      .panel h2 {
+        margin: 0 0 12px;
+        font-size: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      .config-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      label {
+        font-size: 13px;
+        color: var(--muted);
+        display: grid;
+        gap: 6px;
+      }
+
+      input {
+        border-radius: 10px;
+        border: 1px solid var(--panel-border);
+        padding: 8px 10px;
+        background: #0b1220;
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+      }
+
+      .chat {
+        display: grid;
+        gap: 16px;
+      }
+
+      .messages {
+        min-height: 420px;
+        max-height: 55vh;
+        overflow-y: auto;
+        padding-right: 8px;
+      }
+
+      .bubble {
+        padding: 12px 14px;
+        border-radius: 14px;
+        margin-bottom: 10px;
+        line-height: 1.4;
+        font-size: 15px;
+      }
+
+      .bubble.user {
+        background: var(--user);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .bubble.assistant {
+        background: var(--assistant);
+        border: 1px solid rgba(94, 234, 212, 0.2);
+      }
+
+      .input-row {
+        display: grid;
+        gap: 10px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 96px;
+        resize: vertical;
+        border-radius: 12px;
+        border: 1px solid var(--panel-border);
+        padding: 12px;
+        background: #0b1220;
+        color: var(--text);
+        font-size: 15px;
+        line-height: 1.4;
+      }
+
+      button {
+        border: none;
+        border-radius: 12px;
+        padding: 12px 16px;
+        font-size: 15px;
+        font-weight: 600;
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        color: #0b0f1a;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(94, 234, 212, 0.25);
+      }
+
+      .footer {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Disk-Backed <span>MoE</span> Chat</h1>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>Runtime</h2>
+        <div class="config-grid">
+          <div class="footer" id="runtimeInfo">Loading runtime…</div>
+          <label>
+            Router top-k (active experts)
+            <input id="routerTopK" type="number" value="1" min="1" />
+          </label>
+          <label id="oracleRow">
+            Oracle top-k (prefetch)
+            <input id="oracleTopK" type="number" value="1" min="1" />
+          </label>
+          <label>
+            Max new tokens
+            <input id="maxTokens" type="number" value="32" min="1" />
+          </label>
+          <label>
+            Stream response (SSE)
+            <input id="streamToggle" type="checkbox" checked />
+          </label>
+        </div>
+        <div class="footer">
+          Tip: raise router top-k to 8 for multi-expert routing, increase cache size in server args.
+        </div>
+      </section>
+
+      <section class="panel chat">
+        <div class="messages" id="messages"></div>
+        <div class="input-row">
+          <textarea id="promptInput" placeholder="Ask the sharded MoE something..."></textarea>
+          <button id="sendBtn">Send</button>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const messagesEl = document.getElementById("messages");
+      const inputEl = document.getElementById("promptInput");
+      const sendBtn = document.getElementById("sendBtn");
+      const runtimeInfo = document.getElementById("runtimeInfo");
+      const oracleRow = document.getElementById("oracleRow");
+      const oracleInput = document.getElementById("oracleTopK");
+      const routerInput = document.getElementById("routerTopK");
+      let oracleEnabled = true;
+
+      async function loadRuntime() {
+        try {
+          const res = await fetch("/api/health");
+          if (!res.ok) throw new Error("health check failed");
+          const data = await res.json();
+          const backend = data.backend || "unknown";
+          const device = data.device || "unknown";
+          const experts =
+            data.config?.n_routed_experts ??
+            data.config?.num_experts ??
+            data.config?.n_experts ??
+            null;
+          runtimeInfo.textContent = `Backend: ${backend} · Device: ${device}${experts ? ` · Experts: ${experts}` : ""}`;
+          if (experts) {
+            routerInput.max = String(experts);
+          }
+          oracleEnabled = data.oracle_enabled !== false;
+          if (backend === "glm4" && !oracleEnabled) {
+            oracleRow.style.display = "none";
+          } else {
+            oracleRow.style.display = "grid";
+          }
+          if (data.oracle_top_k) {
+            oracleInput.value = String(data.oracle_top_k);
+          }
+        } catch (err) {
+          runtimeInfo.textContent = "Runtime info unavailable.";
+        }
+      }
+
+      function appendBubble(text, role) {
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${role}`;
+        bubble.textContent = text;
+        messagesEl.appendChild(bubble);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return bubble;
+      }
+
+      async function sendPrompt() {
+        const prompt = inputEl.value.trim();
+        if (!prompt) return;
+        appendBubble(prompt, "user");
+        inputEl.value = "";
+
+        const payload = {
+          prompt,
+          max_new_tokens: Number(document.getElementById("maxTokens").value || 32),
+          router_top_k: Number(document.getElementById("routerTopK").value || 1),
+        };
+        if (oracleEnabled) {
+          payload.oracle_top_k = Number(document.getElementById("oracleTopK").value || 1);
+        }
+
+        try {
+          const stream = document.getElementById("streamToggle").checked;
+          const endpoint = stream ? "/api/chat/stream" : "/api/chat";
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            appendBubble(`Error: ${text}`, "assistant");
+            return;
+          }
+          if (!stream) {
+            const data = await res.json();
+            const reply = data.choices?.[0]?.message?.content || "(no response)";
+            appendBubble(reply, "assistant");
+            return;
+          }
+          const assistantBubble = appendBubble("", "assistant");
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop() || "";
+            for (const part of parts) {
+              const line = part.trim().split("\n").find((l) => l.startsWith("data:"));
+              if (!line) continue;
+              const data = line.slice(5).trim();
+              if (data === "[DONE]") {
+                return;
+              }
+              try {
+                const payload = JSON.parse(data);
+                const token = payload.token || "";
+                assistantBubble.textContent += token;
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+              } catch (err) {
+                assistantBubble.textContent += data;
+              }
+            }
+          }
+        } catch (err) {
+          appendBubble(`Error: ${err}`, "assistant");
+        }
+      }
+
+      sendBtn.addEventListener("click", sendPrompt);
+      inputEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          sendPrompt();
+        }
+      });
+
+      loadRuntime();
+    </script>
+  </body>
+</html>

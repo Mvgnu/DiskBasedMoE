@@ -1,0 +1,30 @@
+# OS / editor
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Env / secrets
+venv/
+.env
+.env.*
+
+# Caches / logs
+.cache/
+logs/
+*.log
+
+# Model weights / artifacts
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.npz
+*.dat
+
+# Local exports
+models/
+*_disk/
