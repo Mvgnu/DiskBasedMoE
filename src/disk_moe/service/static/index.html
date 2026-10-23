@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DiskBasedMoE · local chat</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; background: #10141b; color: #e7ebf2; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 920px; padding: 28px 20px; }
+    header { border-bottom: 1px solid #303846; margin-bottom: 24px; }
+    h1 { margin: 0 0 8px; font-size: 1.7rem; }
+    .muted, #status { color: #aeb8c8; font-size: .9rem; line-height: 1.5; }
+    #runtime { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #messages { min-height: 200px; max-height: 52vh; overflow-y: auto; padding: 10px 0; }
+    article { margin: 12px 0; padding: 16px; background: #1b2330; border-radius: 10px; }
+    article strong { display: block; color: #8ee0c9; margin-bottom: 8px; font-size: .8rem; }
+    article p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+    textarea, input { font: inherit; background: #18202b; color: inherit; border: 1px solid #475268; border-radius: 7px; padding: 10px; }
+    textarea { display: block; width: 100%; min-height: 110px; resize: vertical; margin: 8px 0 12px; }
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+    label { display: block; font-size: .9rem; }
+    label input { display: block; width: 140px; margin-top: 6px; }
+    button { font: inherit; font-weight: 600; border: 1px solid #475268; border-radius: 7px; padding: 11px 16px; cursor: pointer; color: inherit; background: #263344; }
+    button[type=submit] { background: #8ee0c9; color: #10141b; border-color: #8ee0c9; }
+    button:disabled { opacity: .45; cursor: default; }
+    :focus-visible { outline: 3px solid #8ee0c9; outline-offset: 3px; }
+    #metrics { font: .8rem ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: #aeb8c8; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DiskBasedMoE <span class="muted">/ local chat</span></h1>
+    <p class="muted">Experimental native GLM4 inference. Model routing follows the checkpoint.</p>
+    <p id="runtime" class="muted">Loading runtime details…</p>
+  </header>
+  <main>
+    <div id="messages" role="log" aria-label="Conversation" aria-live="polite"></div>
+    <form id="chatForm">
+      <label for="prompt">Message</label>
+      <textarea id="prompt" maxlength="32768" required placeholder="Write a message…"></textarea>
+      <div class="controls">
+        <label for="maxTokens">Maximum new tokens<input id="maxTokens" type="number" min="1" max="2048" value="128" required></label>
+        <button id="send" type="submit" disabled>Send</button>
+        <button id="cancel" type="button" disabled>Stop</button>
+        <button id="clear" type="button">New conversation</button>
+      </div>
+    </form>
+    <p id="status" role="status">Connecting…</p>
+    <pre id="metrics" aria-label="Last request metrics"></pre>
+  </main>
+  <script>
+    const byId = id => document.getElementById(id);
+    let history = [];
+    let controller = null;
+    let ready = false;
+    const setBusy = busy => {
+      byId('send').disabled = busy || !ready;
+      byId('cancel').disabled = !busy;
+      byId('clear').disabled = busy;
+      byId('maxTokens').disabled = busy;
+    };
+    function bubble(role, content) {
+      const article = document.createElement('article');
+      const heading = document.createElement('strong');
+      heading.textContent = role === 'user' ? 'YOU' : 'ASSISTANT';
+      const text = document.createElement('p');
+      text.textContent = content;
+      article.append(heading, text);
+      byId('messages').append(article);
+      article.scrollIntoView({block: 'nearest'});
+      return text;
+    }
+    async function loadRuntime() {
+      try {
+        const response = await fetch('/api/health');
+        if (!response.ok) throw new Error('Runtime unavailable');
+        const data = await response.json();
+        const engine = data.engine || {};
+        byId('runtime').textContent = JSON.stringify(engine, null, 2);
+        byId('maxTokens').value = data.limits.default_max_new_tokens;
+        ready = true;
+        byId('status').textContent = 'Ready. Requests run one at a time.';
+        setBusy(false);
+      } catch (error) {
+        byId('status').textContent = error.message + '. Check the server and reload.';
+      }
+    }
+    byId('chatForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      if (controller || !ready) return;
+      const prompt = byId('prompt').value.trim();
+      if (!prompt) return;
+      const candidate = [...history, {role: 'user', content: prompt}];
+      controller = new AbortController();
+      setBusy(true);
+      byId('metrics').textContent = '';
+      byId('status').textContent = 'Waiting for inference…';
+      bubble('user', prompt);
+      const answer = bubble('assistant', '');
+      let complete = false;
+      let terminal = false;
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({messages: candidate, max_new_tokens: Number(byId('maxTokens').value)}),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const body = await response.json();
+          throw new Error(typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail));
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!complete) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream: true});
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop();
+          for (const frame of frames) {
+            const data = frame.split('\n').find(line => line.startsWith('data: '));
+            if (!data) continue;
+            const payload = data.slice(6);
+            if (payload === '[DONE]') { complete = true; break; }
+            const message = JSON.parse(payload);
+            if (message.error) throw new Error(message.error);
+            answer.textContent += message.delta || '';
+            byId('status').textContent = 'Generating…';
+            if (message.finish_reason) {
+              terminal = true;
+              byId('status').textContent = message.finish_reason === 'length' ? 'Output limit reached.' : 'Complete.';
+              byId('metrics').textContent = JSON.stringify(message.metrics || {}, null, 2);
+            }
+          }
+        }
+        if (!complete || !terminal) throw new Error('Stream ended before completion');
+        history = answer.textContent
+          ? [...candidate, {role: 'assistant', content: answer.textContent}]
+          : candidate;
+        byId('prompt').value = '';
+      } catch (error) {
+        byId('status').textContent = error.name === 'AbortError'
+          ? 'Stopped. The current model step may finish before the next request starts.'
+          : 'Error: ' + error.message;
+        if (!answer.textContent) answer.textContent = '(No completed response)';
+      } finally {
+        controller = null;
+        setBusy(false);
+      }
+    });
+    byId('cancel').addEventListener('click', () => controller?.abort());
+    byId('clear').addEventListener('click', () => {
+      history = [];
+      byId('messages').replaceChildren();
+      byId('metrics').textContent = '';
+      byId('status').textContent = 'New conversation.';
+    });
+    loadRuntime();
+  </script>
+</body>
+</html>

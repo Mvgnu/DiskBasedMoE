@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "disk-based-moe"
+version = "0.2.0"
+description = "Measured disk-backed MoE experiments with native model semantics"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+runtime = ["torch==2.14.1", "transformers==5.20.2", "safetensors==0.8.0"]
+serve = ["fastapi==0.161.1", "uvicorn==0.54.0"]
+dev = ["pytest==9.1.1", "httpx==0.28.1", "ruff==0.17.2", "build==1.6.1", "setuptools==78.1.0", "PyYAML==6.0.3"]
+
+[project.scripts]
+disk-moe-serve = "disk_moe.service.cli:main"
+disk-moe-export = "disk_moe.runtime.export:main"
+disk-moe-plan = "disk_moe.evaluation.planning:main"
+disk-moe-io-bench = "disk_moe.evaluation.io_bench:main"
+disk-moe-benchmark = "disk_moe.evaluation.model_bench:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"disk_moe.service" = ["static/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = ["experiments/legacy", ".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
