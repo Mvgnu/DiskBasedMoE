@@ -1,30 +1,26 @@
-# OS / editor
-.DS_Store
-
-# Python
+.venv/
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-
-# Env / secrets
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+artifacts/
+*.safetensors
+*.pt
+*.bin
+*.gguf
+*.npy
+*.npz
+.DS_Store
 venv/
 .env
 .env.*
-
-# Caches / logs
 .cache/
 logs/
 *.log
-
-# Model weights / artifacts
-*.pt
-*.bin
-*.safetensors
 *.onnx
-*.npz
 *.dat
-
-# Local exports
 models/
 *_disk/

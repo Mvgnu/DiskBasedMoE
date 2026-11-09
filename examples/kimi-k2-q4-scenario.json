@@ -1,0 +1,19 @@
+{
+  "description": "Analytical original Kimi K2 geometry under uniform Q4_0 (4.5 effective bits), with FP32 routing-correction buffers. Full parameter count is derived from native geometry, not rounded to 1T. NOT a measured K2.7 result or supported model adapter. 7 GB/s and 0.25 seconds other work are hypothetical. Memory placement, headers/alignment and duplicate preparation storage are not evaluated.",
+  "sources": [
+    "https://huggingface.co/moonshotai/Kimi-K2-Instruct/raw/main/config.json",
+    "https://huggingface.co/moonshotai/Kimi-K2-Instruct/raw/main/modeling_deepseek.py",
+    "https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-common.h"
+  ],
+  "parameters": {
+    "total_params": 1026408209408,
+    "routed_params_per_token": 21139292160,
+    "effective_bits": 4.5,
+    "read_gbps": 7,
+    "cache_hit_rate": 0,
+    "other_seconds_per_token": 0.25,
+    "target_tps": 1,
+    "read_amplification": 1,
+    "extra_storage_bytes": 92160
+  }
+}
